@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Daily Planner</title>
+<style>
+  :root { --bg: #f3f6f9; --ink: #172433; --muted: #5f7085; --line: #d9e1ea; --card: #fff; --teal: #0c8599; --event: #7048e8; --break: #74b816; --green: #2b8a3e; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 system-ui, "Segoe UI", sans-serif; }
+  main { max-width: 1040px; margin: 0 auto; padding: 26px 16px 56px; }
+  h1 { font-size: 32px; line-height: 1.1; margin: 0; } h1 span { color: var(--teal); } .sub { color: var(--muted); margin: 4px 0 8px; }
+  #status { font-size: 13px; color: var(--muted); margin: 0 0 12px; } #status.ok { color: var(--green); } #status.err { color: #c92a2a; }
+  .cols { display: grid; grid-template-columns: 1fr 1.1fr; gap: 16px; align-items: start; } @media (max-width: 820px) { .cols { grid-template-columns: 1fr; } }
+  .panel { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 16px 18px; margin-bottom: 16px; } .panel h2 { font-size: 17px; margin: 0 0 8px; }
+  label.small { font-size: 13px; font-weight: 700; color: var(--muted); }
+  input, select, textarea { font: inherit; padding: 8px 10px; border: 2px solid var(--line); border-radius: 10px; background: #fff; color: var(--ink); min-width: 0; } textarea { width: 100%; min-height: 170px; resize: vertical; }
+  input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible { outline: 3px solid #66d9e8; outline-offset: 2px; }
+  button { font: inherit; font-weight: 700; padding: 10px 18px; border: 0; border-radius: 10px; background: var(--teal); color: #fff; cursor: pointer; }
+  button.ghost { background: #fff; color: var(--ink); border: 1px solid var(--line); padding: 5px 10px; font-size: 13px; } button.busy { opacity: .55; cursor: progress; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 10px; } .note { color: var(--muted); font-size: 14px; min-height: 20px; margin: 8px 0 0; } .fine { color: var(--muted); font-size: 13px; }
+  .ev { display: flex; gap: 6px; align-items: center; margin-top: 6px; } .ev input[type=text] { flex: 1; }
+  .block { display: grid; grid-template-columns: 110px 1fr; gap: 10px; align-items: start; padding: 8px 10px; border-radius: 10px; margin-bottom: 6px; border-left: 5px solid var(--teal); background: #f8fbfc; }
+  .block.event { border-left-color: var(--event); background: #f3f0ff; } .block.break { border-left-color: var(--break); background: #f4fce3; } .block.now { outline: 2px solid var(--teal); } .block.done .what { text-decoration: line-through; color: var(--muted); }
+  .block .when { font: 700 14px ui-monospace, Consolas, monospace; color: var(--muted); } .block label { display: flex; gap: 8px; align-items: flex-start; cursor: pointer; } .block input[type=checkbox] { width: 18px; height: 18px; margin-top: 3px; accent-color: var(--green); }
+  .block small { display: block; color: var(--muted); font-size: 13px; } .imp { color: #d9480f; font-weight: 800; } .over { background: #fff4e6; border-radius: 10px; padding: 8px 12px; font-size: 14px; margin-top: 8px; } .hidden { display: none; }
+  #summary { font-weight: 700; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Daily <span>Planner</span></h1>
+  <p class="sub">List what you need to do today. Get a smart order and a timeline that fits around your appointments, with breaks.</p>
+  <p id="status">Checking the AI day planner...</p>
+  <div class="cols">
+    <section>
+      <div class="panel">
+        <h2>My day</h2>
+        <div class="row" style="margin-top:0"><label class="small" for="dayStart">Start</label><input id="dayStart" type="time" value="09:00"><label class="small" for="dayEnd">End</label><input id="dayEnd" type="time" value="18:00"></div>
+        <h2 style="margin-top:14px">Fixed appointments</h2><div id="events"></div><div class="row"><button class="ghost" id="addEv">+ Add appointment</button></div>
+      </div>
+      <div class="panel">
+        <h2>Tasks (one per line)</h2>
+        <textarea id="tasks" placeholder="Finish math homework (45m) !&#10;Reply to emails (20m)&#10;Go grocery shopping (1h)&#10;Clean my desk&#10;Practice guitar (30m)"></textarea>
+        <p class="fine">Add a time like (30m) or (1h) if you know it. Put ! at the end for important tasks.</p>
+        <div class="row"><button id="go">Plan my day</button><button class="ghost" id="sample">Try a sample</button></div>
+        <p class="note" id="note"></p>
+      </div>
+    </section>
+    <section class="panel" id="out" aria-live="polite">
+      <h2>Today's timeline</h2><p id="summary" class="fine">Your timeline will appear here.</p>
+      <div id="timeline"></div><div id="overflow"></div>
+      <div class="row"><button class="ghost" id="copy">Copy plan</button><button class="ghost" id="clear">Clear</button></div>
+    </section>
+  </div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let events = [], plan = null, busy = false, ai = { ready: false, message: "Loading...", percent: null, error: null };
+try { const s = JSON.parse(localStorage.getItem("dayPlan") || "null"); if (s) { events = s.events || []; plan = s.plan || null; $("tasks").value = s.tasks || ""; $("dayStart").value = s.start || "09:00"; $("dayEnd").value = s.end || "18:00"; } } catch {}
+const persist = () => { try { localStorage.setItem("dayPlan", JSON.stringify({ events, plan, tasks: $("tasks").value, start: $("dayStart").value, end: $("dayEnd").value })); } catch {} };
+const toMin = (t) => { const [h, m] = t.split(":").map(Number); return h * 60 + m; }, toTime = (m) => { const h = Math.floor(m / 60) % 24, mm = m % 60; return new Date(2000, 0, 1, h, mm).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" }); };
+
+// ---------- Appointments ----------
+function drawEvents() {
+  const box = $("events"); box.innerHTML = events.length ? "" : '<p class="fine">No appointments yet.</p>';
+  events.forEach((ev) => { const r = document.createElement("div"); r.className = "ev"; const t = document.createElement("input"); t.type = "time"; t.value = ev.time; t.setAttribute("aria-label", "Appointment time"); t.addEventListener("input", () => { ev.time = t.value; persist(); });
+    const d = document.createElement("select"); d.setAttribute("aria-label", "Appointment length"); [15, 30, 45, 60, 90, 120].forEach((m) => { const o = document.createElement("option"); o.value = m; o.textContent = m < 60 ? m + " min" : m / 60 + " h"; if (+ev.minutes === m) o.selected = true; d.append(o); }); d.addEventListener("change", () => { ev.minutes = +d.value; persist(); });
+    const l = document.createElement("input"); l.type = "text"; l.value = ev.label; l.placeholder = "e.g. Lunch, Dentist"; l.maxLength = 60; l.setAttribute("aria-label", "Appointment name"); l.addEventListener("input", () => { ev.label = l.value; persist(); });
+    const x = document.createElement("button"); x.className = "ghost"; x.textContent = "\u00d7"; x.setAttribute("aria-label", "Remove appointment"); x.addEventListener("click", () => { events = events.filter((k) => k !== ev); persist(); drawEvents(); }); r.append(t, d, l, x); box.append(r); });
+}
+$("addEv").addEventListener("click", () => { events.push({ time: "12:30", minutes: 60, label: "" }); persist(); drawEvents(); $("events").lastChild.querySelector("input[type=text]").focus(); });
+$("sample").addEventListener("click", () => { $("tasks").value = "Finish math homework (45m) !\nReply to emails (20m)\nGo grocery shopping (1h)\nClean my desk\nPractice guitar (30m)\nCall grandma (15m)\nRead chapter 4 for English (40m) !"; events = [{ time: "12:30", minutes: 60, label: "Lunch with family" }, { time: "15:00", minutes: 60, label: "Football practice" }]; persist(); drawEvents(); });
+
+// ---------- Read the task list: "(30m)", "(1h)", "(1.5h)", "45 min" and "!" ----------
+function parseTasks() {
+  return $("tasks").value.split("\n").map((l) => l.trim()).filter(Boolean).slice(0, 25).map((l) => {
+    const important = /!\s*$/.test(l); let text = l.replace(/!+\s*$/, "").trim(), minutes = 0, m;
+    if ((m = text.match(/\(?\s*(\d+(?:\.\d+)?)\s*(h|hr|hrs|hours?)\b\s*\)?/i))) { minutes = Math.round(parseFloat(m[1]) * 60); text = text.replace(m[0], ""); }
+    else if ((m = text.match(/\(?\s*(\d+)\s*(m|min|mins|minutes?)\b\s*\)?/i))) { minutes = +m[1]; text = text.replace(m[0], ""); }
+    return { text: text.replace(/\s{2,}/g, " ").trim(), minutes, important };
+  }).filter((t) => t.text);
+}
+// ---------- Put tasks on the timeline (plain code): skip appointments, add a 10-minute break after 90 minutes of work ----------
+function schedule(order) {
+  const start = toMin($("dayStart").value), end = toMin($("dayEnd").value), evs = events.filter((e) => e.time).map((e) => ({ s: toMin(e.time), e: toMin(e.time) + +e.minutes, label: e.label || "Appointment" })).sort((a, b) => a.s - b.s);
+  const blocks = evs.filter((e) => e.e > start && e.s < end).map((e) => ({ type: "event", s: e.s, e: e.e, what: e.label })), over = []; let cur = start, worked = 0;
+  const clash = (s, e) => evs.find((x) => s < x.e && e > x.s);
+  for (const t of order) {
+    if (worked >= 90) { let c; while ((c = clash(cur, cur + 10))) cur = c.e; if (cur + 10 <= end) { blocks.push({ type: "break", s: cur, e: cur + 10, what: "Short break: stretch, water, look away from screens" }); cur += 10; } worked = 0; }
+    let c; while ((c = clash(cur, cur + t.minutes))) { cur = c.e; worked = 0; }
+    if (cur + t.minutes > end) { over.push(t); continue; }
+    blocks.push({ type: "task", s: cur, e: cur + t.minutes, what: t.task, why: t.why, important: t.important, done: false }); cur += t.minutes; worked += t.minutes;
+  }
+  return { blocks: blocks.sort((a, b) => a.s - b.s), over };
+}
+function fallbackOrder(tasks) { return [...tasks].sort((a, b) => b.important - a.important || (b.minutes || 30) - (a.minutes || 30)).map((t) => ({ task: t.text, minutes: t.minutes || 30, why: t.important ? "Important, so it goes first" : "", important: t.important })); }
+async function go() {
+  if (busy) return; const tasks = parseTasks(); if (!tasks.length) { $("note").textContent = "Add some tasks first (or try the sample)."; return $("tasks").focus(); }
+  if (toMin($("dayEnd").value) <= toMin($("dayStart").value)) { $("note").textContent = "The end of your day must be after the start."; return; }
+  let order, src;
+  if (!ai.ready) { order = fallbackOrder(tasks); src = "Important tasks first, then bigger ones (AI loading)"; $("note").textContent = (ai.error ? "The AI isn't available" : "The AI is still loading" + (ai.percent != null ? " (" + ai.percent + "%)" : "")) + ", so tasks were ordered by importance and size. Tasks without a time got 30 minutes."; }
+  else { busy = true; $("go").classList.add("busy"); $("note").textContent = "Finding the best order...";
+    try { const res = await fetch("/api/order", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ tasks }) }); const r = await res.json(); if (!res.ok) throw new Error(r.error); order = r; src = "Order and time estimates by the on-device AI"; $("note").textContent = ""; }
+    catch (err) { order = fallbackOrder(tasks); src = "Important tasks first"; $("note").textContent = "The AI had a problem (" + err.message + "), so tasks were ordered by importance."; }
+    busy = false; $("go").classList.remove("busy"); }
+  const s = schedule(order); plan = { src, ...s }; persist(); draw();
+}
+function draw() {
+  const box = $("timeline"); box.innerHTML = ""; $("overflow").innerHTML = ""; if (!plan) return;
+  const now = new Date(), nm = now.getHours() * 60 + now.getMinutes(), tasks = plan.blocks.filter((b) => b.type === "task"), done = tasks.filter((b) => b.done).length, mins = tasks.reduce((a, b) => a + (b.e - b.s), 0);
+  $("summary").textContent = plan.src + " \u00b7 " + done + " of " + tasks.length + " tasks done \u00b7 " + Math.floor(mins / 60) + "h " + (mins % 60) + "m of work";
+  plan.blocks.forEach((b) => { const d = document.createElement("div"); d.className = "block " + b.type + (b.done ? " done" : "") + (nm >= b.s && nm < b.e ? " now" : ""); const w = document.createElement("div"); w.className = "when"; w.textContent = toTime(b.s) + "\n\u2013 " + toTime(b.e); w.style.whiteSpace = "pre";
+    const body = document.createElement("div");
+    if (b.type === "task") { const l = document.createElement("label"); const cb = document.createElement("input"); cb.type = "checkbox"; cb.checked = b.done; cb.addEventListener("change", () => { b.done = cb.checked; persist(); draw(); }); const s = document.createElement("span"); s.className = "what"; s.textContent = b.what; if (b.important) { const i = document.createElement("span"); i.className = "imp"; i.textContent = " !"; s.append(i); } l.append(cb, s); body.append(l); if (b.why) { const sm = document.createElement("small"); sm.textContent = b.why; body.append(sm); } }
+    else { const s = document.createElement("span"); s.className = "what"; s.textContent = (b.type === "event" ? "\ud83d\udcc5 " : "\u2615 ") + b.what; body.append(s); }
+    d.append(w, body); box.append(d); });
+  if (plan.over.length) { const o = document.createElement("div"); o.className = "over"; o.textContent = "\u26a0 Doesn't fit today: " + plan.over.map((t) => t.task).join(", ") + ". Move it to tomorrow, or make your day longer."; $("overflow").append(o); }
+}
+$("go").addEventListener("click", go); $("tasks").addEventListener("keydown", (e) => { if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) go(); }); ["tasks", "dayStart", "dayEnd"].forEach((id) => $(id).addEventListener("input", persist));
+$("copy").addEventListener("click", async () => { if (!plan) return; const t = plan.blocks.map((b) => toTime(b.s) + "\u2013" + toTime(b.e) + "  " + (b.type === "task" ? (b.done ? "[x] " : "[ ] ") : b.type === "event" ? "\ud83d\udcc5 " : "\u2615 ") + b.what).join("\n"); try { await navigator.clipboard.writeText(t); $("copy").textContent = "Copied!"; } catch { $("copy").textContent = "Press Ctrl+C"; } setTimeout(() => ($("copy").textContent = "Copy plan"), 1200); });
+$("clear").addEventListener("click", () => { if (confirm("Clear today's plan?")) { plan = null; persist(); draw(); $("summary").textContent = "Your timeline will appear here."; } });
+setInterval(draw, 60000);   // move the "now" highlight every minute
+
+async function checkStatus() {
+  try { ai = await (await fetch("/api/status")).json();
+    if (ai.error) return setStatus("AI error: " + ai.error + ". Simple ordering still works.", "err");
+    if (ai.ready) return setStatus("AI day planner ready. It runs on your device.", "ok");
+    setStatus(ai.message + (ai.percent != null ? " " + ai.percent + "%" : "") + " Simple ordering works meanwhile.");
+  } catch { ai = { ready: false, error: "the server can't be reached" }; setStatus("Can't reach the server. Open http://localhost:3079 and make sure npm start is running.", "err"); return; }
+  setTimeout(checkStatus, 1500);
+}
+function setStatus(t, c = "") { $("status").textContent = t; $("status").className = c; }
+drawEvents(); draw(); checkStatus();
+</script>
+</body>
+</html>
