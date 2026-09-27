@@ -1,0 +1,10 @@
+{
+  "name": "qvac-daily-planner",
+  "version": "1.0.0",
+  "description": "Daily Planner: list your tasks and fixed appointments, and an on-device AI puts them in a smart order with time estimates, then the page builds a timeline for your day with breaks. Powered by the QVAC SDK.",
+  "type": "module",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "dependencies": { "@qvac/sdk": "^0.19.0" },
+  "license": "MIT"
+}
